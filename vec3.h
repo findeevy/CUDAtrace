@@ -48,10 +48,15 @@ struct vec3 {
             x * other.y - y * other.x
         );
     }
-
     __host__ __device__ inline
     float magnitude() const {
         return sqrtf(x*x + y*y + z*z);
+    }
+
+    __host__ __device__ inline
+    vec3 normalized() const {
+      float mag = magnitude();
+      return *this/mag;
     }
 
     __host__ __device__
