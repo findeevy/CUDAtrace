@@ -2,11 +2,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
-#include "../vec3.h"
+#include "../ray.h"
 #include <cuda_runtime.h>
 
 
-__global__ void render(vec3 *fb, int max_x, int max_y){
+__device__ bool hit_sphere(const vec3& center, float radius, const ray& r){
+
+    //vec3 from sphere center to origin
+    vec3 oc = r.origin() - center;
+    float a = r.direction().dot(r.direction());
+    float b = 2.0f * oc.dot(r.direction());
+    float c = oc.dot(oc) - radius*radius;
+    float discriminant = b*b - 4.0f*a*c;
+    // sphere is intersected if >= 0
+    return discriminant > 0.0f;
+
+
+}
+
+__device__ vec3 color(const ray& r){
+
+    // color red for sphere hit
+    if(hit_sphere(vec3(0,0,-1),0.5,r)){
+        return vec3(1,0,0);
+    }
+    vec3 unit_direction = r.direction().normalized();
+    float t = 0.5f*unit_direction.y +1.0f;
+    // sky gradient
+    return (1.0f-t)*vec3(1.0,1.0,1.0)+ t*vec3(0.5,0.7,1.0);
+
+}
+
+__global__ void render(vec3 *fb, int max_x, int max_y,
+                       vec3 low_left_corner, vec3 horizontal, vec3 vertical, vec3 origin ){
     //pixel coords i, j
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
@@ -15,12 +43,12 @@ __global__ void render(vec3 *fb, int max_x, int max_y){
 
     // get index of pixel in the form of 1d array
     int pixel_idx = j*max_x+i;
-    float r = float(i) / (max_x - 1);
-    float g = float(j) / (max_y - 1);
-    float b = 0.0f;
 
+    float u = float(i)/float(max_x);
+    float v = float(j) / float(max_y);
+    ray r(origin,low_left_corner+u*horizontal+v*vertical);
     // frame buffer array is 1d array of pixels
-    fb[pixel_idx] = vec3(r,g,b);
+    fb[pixel_idx] = color(r);
     
 
 }
@@ -46,7 +74,10 @@ int main(){
     dim3 threads(threads_x, threads_y);
 
     // LAUNCH KERNEL
-    render<<<blocks, threads>>>(frame_buffer, image_width, image_height);
+    render<<<blocks, threads>>>(frame_buffer, image_width, image_height,vec3(-2.0, -1.0, -1.0),
+                                vec3(4.0, 0.0, 0.0),
+                                vec3(0.0, 2.0, 0.0),
+                                vec3(0.0, 0.0, 0.0));
 
     err = cudaGetLastError();
     if (err != cudaSuccess) {
