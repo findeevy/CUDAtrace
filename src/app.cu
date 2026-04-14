@@ -3,10 +3,11 @@
 #include <stdlib.h>
 #include <iostream>
 #include "../ray.h"
+#include "../phong.h"
 #include <cuda_runtime.h>
 
 
-__device__ bool hit_sphere(const vec3& center, float radius, const ray& r){
+__device__ float hit_sphere(const vec3& center, float radius, const ray& r){
 
     //vec3 from sphere center to origin
     vec3 oc = r.origin() - center;
@@ -14,18 +15,58 @@ __device__ bool hit_sphere(const vec3& center, float radius, const ray& r){
     float b = 2.0f * oc.dot(r.direction());
     float c = oc.dot(oc) - radius*radius;
     float discriminant = b*b - 4.0f*a*c;
-    // sphere is intersected if >= 0
-    return discriminant > 0.0f;
 
+    if (discriminant < 0.0f) return -1.0f;  // no hit
+    float sqrt_d = sqrtf(discriminant);
 
+    float t1 = (-b - sqrt_d) / (2.0f * a);
+    if (t1 > 0.0f) return t1;  // closer hit
+
+    float t2 = (-b + sqrt_d) / (2.0f * a);
+    if (t2 > 0.0f) return t2;  // farthest hit
+
+    return -1.0f;  // both are negative, behind ray origin
 }
 
 __device__ vec3 color(const ray& r){
 
-    // color red for sphere hit
-    if(hit_sphere(vec3(0,0,-1),0.5,r)){
-        return vec3(1,0,0);
+    float hit_distance = hit_sphere(vec3(0,0,-1), 0.5, r);
+    if (hit_distance > 0.0f) {
+        // hit the sphere, compute blinn phong lighting
+        vec3 hit_point = r.point_at_parameter(hit_distance);
+        vec3 normal = (hit_point - vec3(0,0,-1)).normalized();
+        
+        // point light position 
+        vec3 light_pos(1, 1, 1);
+        vec3 light_dir = (light_pos - hit_point).normalized();
+        
+        // camera direction (ray is coming from camera, so reverse it)
+        vec3 cam_dir = -1* r.direction().normalized();
+        
+        // material properties
+        vec3 material_color(1, 0, 0);  
+        float shininess = 32.0f;
+        
+        // ambient lighting
+        float ambient_strength = 0.1f;
+        vec3 ambient = ambient_strength * material_color;
+        
+        // diffuse component
+        float diff = diffuse(normal, light_dir);
+        vec3 diffuse_color = diff * material_color;
+        
+        // specular component (blinn phong)
+        float spec = specular(normal, light_dir, cam_dir, shininess);
+        vec3 specular_color = spec * vec3(1, 1, 1);  //white highlight
+        
+        // combine all lighting
+        vec3 result = ambient + diffuse_color + specular_color;
+        result.x = fminf(1.0f, fmaxf(0.0f, result.x));
+        result.y = fminf(1.0f, fmaxf(0.0f, result.y));
+        result.z = fminf(1.0f, fmaxf(0.0f, result.z));
+        return result;
     }
+    
     vec3 unit_direction = r.direction().normalized();
     float t = 0.5f*unit_direction.y +1.0f;
     // sky gradient
