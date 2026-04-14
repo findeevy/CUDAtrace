@@ -1,3 +1,6 @@
+#ifndef VEC3_H
+#define VEC3_H
+
 #include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,3 +88,5 @@ __host__ __device__ inline
 vec3 operator*(float scalar, const vec3& v) {
     return v * scalar;
 }
+
+#endif

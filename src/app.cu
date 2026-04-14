@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <iostream>
 #include "../ray.h"
+#include "../vec3.h"
 #include "../phong.h"
 #include <cuda_runtime.h>
 
