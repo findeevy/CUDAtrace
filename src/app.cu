@@ -116,9 +116,9 @@ int main(){
     dim3 threads(threads_x, threads_y);
 
     // LAUNCH KERNEL
-    render<<<blocks, threads>>>(frame_buffer, image_width, image_height,vec3(-2.0, -1.0, -1.0),
+    render<<<blocks, threads>>>(frame_buffer, image_width, image_height,vec3(-2.0, -2.0, -1.0),
                                 vec3(4.0, 0.0, 0.0),
-                                vec3(0.0, 2.0, 0.0),
+                                vec3(0.0, 4.0, 0.0),
                                 vec3(0.0, 0.0, 0.0));
 
     err = cudaGetLastError();
