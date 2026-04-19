@@ -2,9 +2,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <fstream>
+#include <chrono>
 #include "../ray.h"
 #include "../vec3.h"
 #include "../phong.h"
+#include "../fxaa.h"
 #include <cuda_runtime.h>
 
 
@@ -95,28 +98,37 @@ __global__ void render(vec3 *fb, int max_x, int max_y,
 
 }
 
-int main(){
-
-    int image_width = 256;
-    int image_height = 256;
+int main(int argc, char** argv) {
+    
+    bool use_fxaa = false;
+    for (int a = 1; a < argc; ++a)
+        if (strcmp(argv[a], "--fxaa") == 0) use_fxaa = true;
+    int image_width = 1024;
+    int image_height = 1024;
     int num_pixels = image_width * image_height;
     size_t fb_size = num_pixels * sizeof(vec3);
 
     // unified memory, allocated frame buffer, device memory
-    vec3 *frame_buffer;
-    cudaError_t err = cudaMallocManaged((void **)&frame_buffer, fb_size);
+    vec3 *raw_frame_buffer;
+    cudaError_t err = cudaMallocManaged((void **)&raw_frame_buffer, fb_size);
         if (err != cudaSuccess) {
         std::cerr << "CUDA malloc failed " << cudaGetErrorString(err) << std::endl;
         return 1;
     }
+
+    vec3 *fxaa_buffer = nullptr;
+    if (use_fxaa)
+        cudaMallocManaged((void **)&fxaa_buffer, fb_size);
 
     int threads_x =16;
     int threads_y=16;
     dim3 blocks(image_width/threads_x +1, image_height/threads_y +1);
     dim3 threads(threads_x, threads_y);
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     // LAUNCH KERNEL
-    render<<<blocks, threads>>>(frame_buffer, image_width, image_height,vec3(-2.0, -2.0, -1.0),
+    render<<<blocks, threads>>>(raw_frame_buffer, image_width, image_height,vec3(-2.0, -2.0, -1.0),
                                 vec3(4.0, 0.0, 0.0),
                                 vec3(0.0, 4.0, 0.0),
                                 vec3(0.0, 0.0, 0.0));
@@ -124,27 +136,44 @@ int main(){
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: " << cudaGetErrorString(err) << std::endl;
-        cudaFree(frame_buffer);
+        cudaFree(raw_frame_buffer);
         return 1;
     }
 
     // GPU finish
     cudaDeviceSynchronize();
 
+    if (use_fxaa) {
+        fxaa_pass<<<blocks, threads>>>(raw_frame_buffer, fxaa_buffer,
+                                       image_width, image_height);
+        cudaDeviceSynchronize();
+    }
+
+     vec3 *out = use_fxaa ? fxaa_buffer : raw_frame_buffer; 
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    std::cout << "Frame time was " << elapsed.count() << " seconds.\n";
+
     // output frame buffer as ppm (done with CPU)
-    std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
-    for(int j = 0; j < image_height; j++) {
-        for(int i = 0; i < image_width; i++) {
-            size_t pixel_index = j*image_width + i;
+    std::ofstream outFile("output.ppm");
 
-            int ir = int(255.999 * frame_buffer[pixel_index].x);
-            int ig = int(255.999 * frame_buffer[pixel_index].y);
-            int ib = int(255.999 * frame_buffer[pixel_index].z);
+    outFile << "P3\n" << image_width << ' ' << image_height << "\n255\n";
+    for (int j = 0; j < image_height; j++) {
+        for (int i = 0; i < image_width; i++) {
+            size_t pixel_index = j * image_width + i;
 
-            std::cout << ir << ' ' << ig << ' ' << ib << '\n';
+            int ir = int(255.999 * out[pixel_index].x);
+            int ig = int(255.999 * out[pixel_index].y);
+            int ib = int(255.999 * out[pixel_index].z);
+
+            outFile << ir << ' ' << ig << ' ' << ib << '\n';
         }
     }
 
-    cudaFree(frame_buffer);
+    outFile.close();
+
+    cudaFree(raw_frame_buffer);
+    if (fxaa_buffer) cudaFree(fxaa_buffer);
     return 0;
 }
