@@ -1,3 +1,5 @@
+#ifndef RAY_H
+#define RAY_H
 #include "vec3.h"
 
 struct ray{
@@ -14,4 +16,5 @@ struct ray{
     __device__ vec3 point_at_parameter(float t) const {return (orig+t * dir);}
 
 };
+#endif
 
