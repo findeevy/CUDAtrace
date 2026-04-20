@@ -8,6 +8,7 @@
 #include "../vec3.h"
 #include "../phong.h"
 #include "../fxaa.h"
+#include "../stochastic_ss.h"
 #include <cuda_runtime.h>
 
 
@@ -101,8 +102,14 @@ __global__ void render(vec3 *fb, int max_x, int max_y,
 int main(int argc, char** argv) {
     
     bool use_fxaa = false;
-    for (int a = 1; a < argc; ++a)
+    bool use_ssaa = false;
+    int ssaa_samples = 500;
+    
+    for (int a = 1; a < argc; ++a){
         if (strcmp(argv[a], "--fxaa") == 0) use_fxaa = true;
+        if (strcmp(argv[a], "--ssaa") == 0) use_ssaa = true;
+        
+    }
     int image_width = 1024;
     int image_height = 1024;
     int num_pixels = image_width * image_height;
@@ -120,6 +127,10 @@ int main(int argc, char** argv) {
     if (use_fxaa)
         cudaMallocManaged((void **)&fxaa_buffer, fb_size);
 
+    curandState *d_rand_state = nullptr;
+    if (use_ssaa){
+        cudaMalloc((void**)&d_rand_state, num_pixels*sizeof(curandState));
+    }
     int threads_x =16;
     int threads_y=16;
     dim3 blocks(image_width/threads_x +1, image_height/threads_y +1);
@@ -127,13 +138,27 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    // LAUNCH KERNEL
-    render<<<blocks, threads>>>(raw_frame_buffer, image_width, image_height,vec3(-2.0, -2.0, -1.0),
-                                vec3(4.0, 0.0, 0.0),
-                                vec3(0.0, 4.0, 0.0),
-                                vec3(0.0, 0.0, 0.0));
+    if(use_ssaa){
+        // initialize random state
+        ss_init<<<blocks, threads>>>(image_width, image_height, d_rand_state);
+        cudaDeviceSynchronize();
+        
+        // LAUNCH KERNEL WITH STOCHASTIC SUPER SAMPLING ANTI-ALIASING
+        render_ss<<<blocks, threads>>>(raw_frame_buffer, image_width, image_height,ssaa_samples,vec3(-2.0, -2.0, -1.0),
+                                    vec3(4.0, 0.0, 0.0),
+                                    vec3(0.0, 4.0, 0.0),
+                                    vec3(0.0, 0.0, 0.0),
+                                    d_rand_state);
+        
+    }else{
+        // LAUNCH KERNEL with NO ANTI-ALIASING
+        render<<<blocks, threads>>>(raw_frame_buffer, image_width, image_height,vec3(-2.0, -2.0, -1.0),
+                                    vec3(4.0, 0.0, 0.0),
+                                    vec3(0.0, 4.0, 0.0),
+                                    vec3(0.0, 0.0, 0.0));
 
-    err = cudaGetLastError();
+    }
+                                err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: " << cudaGetErrorString(err) << std::endl;
         cudaFree(raw_frame_buffer);
@@ -142,7 +167,7 @@ int main(int argc, char** argv) {
 
     // GPU finish
     cudaDeviceSynchronize();
-
+    // do fxaa post-processing if flag is true
     if (use_fxaa) {
         fxaa_pass<<<blocks, threads>>>(raw_frame_buffer, fxaa_buffer,
                                        image_width, image_height);
@@ -170,10 +195,10 @@ int main(int argc, char** argv) {
             outFile << ir << ' ' << ig << ' ' << ib << '\n';
         }
     }
-
     outFile.close();
 
     cudaFree(raw_frame_buffer);
     if (fxaa_buffer) cudaFree(fxaa_buffer);
+    if(d_rand_state) cudaFree(d_rand_state);
     return 0;
 }
