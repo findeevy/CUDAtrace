@@ -102,11 +102,13 @@ __global__ void render(vec3 *fb, int max_x, int max_y,
 int main(int argc, char** argv) {
     
     bool use_fxaa = false;
+    bool use_fxaa_shm = false;
     bool use_ssaa = false;
     int ssaa_samples = 500;
     
     for (int a = 1; a < argc; ++a){
         if (strcmp(argv[a], "--fxaa") == 0) use_fxaa = true;
+        if (strcmp(argv[a], "--fxaa_shm") == 0) use_fxaa_shm = true;
         if (strcmp(argv[a], "--ssaa") == 0) use_ssaa = true;
         
     }
@@ -124,7 +126,7 @@ int main(int argc, char** argv) {
     }
 
     vec3 *fxaa_buffer = nullptr;
-    if (use_fxaa)
+    if (use_fxaa || use_fxaa_shm)
         cudaMallocManaged((void **)&fxaa_buffer, fb_size);
 
     curandState *d_rand_state = nullptr;
@@ -173,8 +175,12 @@ int main(int argc, char** argv) {
                                        image_width, image_height);
         cudaDeviceSynchronize();
     }
-
-     vec3 *out = use_fxaa ? fxaa_buffer : raw_frame_buffer; 
+    if (use_fxaa_shm) {
+        fxaa_pass_shared<<<blocks, threads>>>(raw_frame_buffer, fxaa_buffer,
+                                       image_width, image_height);
+        cudaDeviceSynchronize();
+    }
+    vec3 *out = (use_fxaa || use_fxaa_shm)? fxaa_buffer : raw_frame_buffer; 
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end - start;

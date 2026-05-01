@@ -11,8 +11,7 @@
 struct vec3 {
     float x, y, z;
 
-    __host__ __device__ inline
-    vec3() : x(0.0f), y(0.0f), z(0.0f) {}
+    vec3() = default;
 
     __host__ __device__ inline
     vec3(float ix, float iy, float iz) : x(ix), y(iy), z(iz) {}
